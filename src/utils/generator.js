@@ -32,6 +32,7 @@ import {
 import { CompilerDiagnostic } from "../errors.js";
 import type { AbstractValueBuildNodeFunction } from "../values/AbstractValue.js";
 import { hashString } from "../methods/index.js";
+import { Path } from "../singletons.js";
 import { TypesDomain, ValuesDomain } from "../domains/index.js";
 import * as t from "babel-types";
 import invariant from "../invariant.js";
@@ -322,8 +323,12 @@ class PossiblyNormalReturnEntry extends GeneratorEntry {
   serialize(context: SerializationContext) {
     let condition = context.serializeValue(this.condition);
     let valuesToProcess = new Set();
-    let consequentBody = context.serializeGenerator(this.consequentGenerator, valuesToProcess);
-    let alternateBody = context.serializeGenerator(this.alternateGenerator, valuesToProcess);
+    let consequentBody = Path.withCondition(this.condition, () =>
+      context.serializeGenerator(this.consequentGenerator, valuesToProcess)
+    );
+    let alternateBody = Path.withInverseCondition(this.condition, () =>
+      context.serializeGenerator(this.alternateGenerator, valuesToProcess)
+    );
     context.emit(t.ifStatement(condition, t.blockStatement(consequentBody), t.blockStatement(alternateBody)));
     context.processValues(valuesToProcess);
   }
@@ -661,11 +666,11 @@ export class Generator {
     }
     let args = [condition].concat(targs).concat(fargs);
     let func = nodes => {
-      return t.ifStatement(
-        nodes[0],
-        tfunc(nodes.slice().splice(1, targs.length)),
+      let tnodes = Path.withCondition(condition, () => tfunc(nodes.slice().splice(1, targs.length)));
+      let fnodes = Path.withInverseCondition(condition, () =>
         ffunc(nodes.slice().splice(targs.length + 1, fargs.length))
       );
+      return t.ifStatement(nodes[0], tnodes, fnodes);
     };
     return [args, func];
   }
@@ -1017,8 +1022,12 @@ export class Generator {
     this._addEntry({
       args: [joinCondition],
       buildNode: function([cond], context, valuesToProcess) {
-        let block1 = generator1.empty() ? null : serializeBody(generator1, context, valuesToProcess);
-        let block2 = generator2.empty() ? null : serializeBody(generator2, context, valuesToProcess);
+        let block1 = generator1.empty()
+          ? null
+          : Path.withCondition(joinCondition, () => serializeBody(generator1, context, valuesToProcess));
+        let block2 = generator2.empty()
+          ? null
+          : Path.withInverseCondition(joinCondition, () => serializeBody(generator2, context, valuesToProcess));
         if (block1) return t.ifStatement(cond, block1, block2);
         invariant(block2);
         return t.ifStatement(t.unaryExpression("!", cond), block2);
