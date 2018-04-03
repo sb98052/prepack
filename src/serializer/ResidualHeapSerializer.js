@@ -106,7 +106,8 @@ export class ResidualHeapSerializer {
     statistics: SerializerStatistics,
     react: ReactSerializerState,
     referentializer: Referentializer,
-    generatorParents: Map<Generator, Generator | FunctionValue | "GLOBAL">
+    generatorParents: Map<Generator, Generator | FunctionValue | "GLOBAL">,
+    conditionalImplications: Map<AbstractValue, { t: boolean, f: boolean }>
   ) {
     this.realm = realm;
     this.logger = logger;
@@ -177,6 +178,7 @@ export class ResidualHeapSerializer {
     this.rewrittenAdditionalFunctions = new Map();
     this.declarativeEnvironmentRecordsBindings = declarativeEnvironmentRecordsBindings;
     this.generatorParents = generatorParents;
+    this.conditionalImplications = conditionalImplications;
     this.additionalFunctionGenerators = new Map();
     this.declaredGlobalLets = new Map();
   }
@@ -229,6 +231,7 @@ export class ResidualHeapSerializer {
   additionalFunctionValueNestedFunctions: Set<FunctionValue>;
 
   generatorParents: Map<Generator, Generator | FunctionValue | "GLOBAL">;
+  conditionalImplications: Map<AbstractValue, { t: boolean, f: boolean }>;
 
   declaredGlobalLets: Map<string, Value>;
 
@@ -1671,6 +1674,15 @@ export class ResidualHeapSerializer {
 
   _serializeAbstractValue(val: AbstractValue): void | BabelNodeExpression {
     invariant(val.kind !== "sentinel member expression", "invariant established by visitor");
+    if (val.kind === "conditional") {
+      let implications = this.conditionalImplications.get(val);
+      invariant(implications !== undefined);
+      if (implications.t && !implications.f) return this.serializeValue(val.args[1]);
+      else if (!implications.t && implications.f) return this.serializeValue(val.args[2]);
+      else if (!implications.t && !implications.f) return voidExpression; // Can this happen?
+      invariant(implications.t && implications.f);
+    }
+
     if (val.hasIdentifier()) {
       return this._serializeAbstractValueHelper(val);
     } else {

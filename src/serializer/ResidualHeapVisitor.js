@@ -11,6 +11,7 @@
 
 import { GlobalEnvironmentRecord, DeclarativeEnvironmentRecord, EnvironmentRecord } from "../environment.js";
 import { Realm } from "../realm.js";
+import { Path } from "../singletons.js";
 import type { Descriptor, PropertyBinding, ObjectKind } from "../types.js";
 import type { Binding } from "../environment.js";
 import { HashSet, IsArray, Get } from "../methods/index.js";
@@ -96,6 +97,7 @@ export class ResidualHeapVisitor {
     this.classMethodInstances = new Map();
     this.functionInstances = new Map();
     this.values = new Map();
+    this.conditionalImplications = new Map();
     let generator = this.realm.generator;
     invariant(generator);
     this.scope = this.globalGenerator = generator;
@@ -109,6 +111,7 @@ export class ResidualHeapVisitor {
     this.additionalFunctionValueInfos = new Map();
     this.functionToCapturedScopes = new Map();
     this.generatorParents = new Map();
+    this.generatorConditionals = new Map();
     let environment = realm.$GlobalEnv.environmentRecord;
     invariant(environment instanceof GlobalEnvironmentRecord);
     this.globalEnvironmentRecord = environment;
@@ -129,6 +132,7 @@ export class ResidualHeapVisitor {
   functionInfos: Map<BabelNodeBlockStatement, FunctionInfo>;
   scope: Scope;
   values: Map<Value, Set<Scope>>;
+  conditionalImplications: Map<AbstractValue, { t: boolean, f: boolean }>;
   inspector: ResidualHeapInspector;
   referencedDeclaredValues: Map<AbstractValue, void | FunctionValue>;
   delayedVisitGeneratorEntries: Array<{| generator: Generator, action: () => void | boolean |}>;
@@ -140,6 +144,7 @@ export class ResidualHeapVisitor {
   someReactElement: void | ObjectValue;
   reactElementEquivalenceSet: ReactElementSet;
   generatorParents: Map<Generator, Generator | FunctionValue | "GLOBAL">;
+  generatorConditionals: Map<Generator, { condition: AbstractValue, inverse: boolean }>;
   createdObjects: Map<ObjectValue, void | Generator>;
 
   globalEnvironmentRecord: GlobalEnvironmentRecord;
@@ -781,8 +786,50 @@ export class ResidualHeapVisitor {
   }
 
   visitAbstractValue(val: AbstractValue): void {
-    if (val.kind === "sentinel member expression")
+    if (val.kind === "sentinel member expression") {
       this.logger.logError(val, "expressions of type o[p] are not yet supported for partially known o and unknown p");
+    } else if (val.kind === "conditional") {
+      let condition = val.args[0];
+      invariant(condition instanceof AbstractValue);
+      this._withUnrelatedScope(this.scope, () => {
+        let implications = this.conditionalImplications.get(val);
+        if (implications === undefined) this.conditionalImplications.set(val, (implications = { t: false, f: false }));
+        if (!implications.t || !implications.f) {
+          let conditionals = [];
+          for (let s = this.scope; s instanceof Generator; s = this.generatorParents.get(s)) {
+            let conditional = this.generatorConditionals.get(s);
+            if (conditional !== undefined) conditionals.push(conditional);
+          }
+          let withConditionals = (f, i = conditionals.length - 1) =>
+            i === -1
+              ? f()
+              : conditionals[i].inverse
+                ? Path.withInverseCondition(conditionals[i].condition, () => withConditionals(f, i - 1))
+                : Path.withCondition(conditionals[i].condition, () => withConditionals(f, i - 1));
+          let newImplications = withConditionals(() => ({
+            t: Path.implies(condition),
+            f: Path.impliesNot(condition),
+          }));
+          if (newImplications.t) implications.t = true;
+          if (newImplications.f) implications.f = true;
+        }
+        if (implications.t && implications.f) {
+          for (let i = 0, n = val.args.length; i < n; i++) {
+            val.args[i] = this.visitEquivalentValue(val.args[i]);
+          }
+          // and we are done visiting this abstract value
+        } else if (implications.t) {
+          val.args[1] = this.visitEquivalentValue(val.args[1]);
+          // and enqueue once more
+          this.visitAbstractValue(val);
+        } else if (implications.f) {
+          val.args[2] = this.visitEquivalentValue(val.args[2]);
+          // and enqueue once more
+          this.visitAbstractValue(val);
+        }
+      });
+      return;
+    }
     for (let i = 0, n = val.args.length; i < n; i++) {
       val.args[i] = this.visitEquivalentValue(val.args[i]);
     }
@@ -880,10 +927,10 @@ export class ResidualHeapVisitor {
       visitValues: (values: Array<Value>) => {
         for (let i = 0, n = values.length; i < n; i++) values[i] = this.visitEquivalentValue(values[i]);
       },
-      visitGenerator: (generator, parent) => {
+      visitGenerator: (generator, parent, conditional) => {
         // TODO: The serializer assumes that each generator has a unique parent; however, in the presence of conditional exceptions that is not actually true.
         // invariant(!this.generatorParents.has(generator));
-        this.visitGenerator(generator, parent, additionalFunctionInfo);
+        this.visitGenerator(generator, parent, additionalFunctionInfo, conditional);
       },
       canSkip: (value: AbstractValue): boolean => {
         return !this.referencedDeclaredValues.has(value) && !this.values.has(value);
@@ -940,9 +987,11 @@ export class ResidualHeapVisitor {
   visitGenerator(
     generator: Generator,
     parent: Generator | FunctionValue | "GLOBAL",
-    additionalFunctionInfo?: AdditionalFunctionInfo
+    additionalFunctionInfo?: AdditionalFunctionInfo,
+    conditional?: { condition: AbstractValue, inverse: boolean }
   ): void {
     this.generatorParents.set(generator, parent);
+    if (conditional !== undefined) this.generatorConditionals.set(generator, conditional);
     if (generator.effectsToApply)
       for (const createdObject of generator.effectsToApply[4]) {
         // TODO: Unfortunately, the following invariant doesn't hold. This is concerning.

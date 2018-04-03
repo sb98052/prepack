@@ -214,7 +214,8 @@ export class Serializer {
         this.statistics,
         this.react,
         referentializer,
-        residualHeapVisitor.generatorParents
+        residualHeapVisitor.generatorParents,
+        residualHeapVisitor.conditionalImplications
       ).serialize();
       if (this.logger.hasErrors()) return undefined;
       if (timingStats !== undefined) timingStats.referenceCountsTime = Date.now() - timingStats.referenceCountsTime;
@@ -243,7 +244,8 @@ export class Serializer {
       this.statistics,
       this.react,
       referentializer,
-      residualHeapVisitor.generatorParents
+      residualHeapVisitor.generatorParents,
+      residualHeapVisitor.conditionalImplications
     );
 
     let ast = residualHeapSerializer.serialize();

@@ -73,7 +73,7 @@ export type SerializationContext = {|
 
 export type VisitEntryCallbacks = {|
   visitValues: (Array<Value>) => void,
-  visitGenerator: (Generator, Generator) => void,
+  visitGenerator: (Generator, Generator, void | { condition: AbstractValue, inverse: boolean }) => void,
   canSkip: AbstractValue => boolean,
   recordDeclaration: AbstractValue => void,
   recordDelayedEntry: (Generator, GeneratorEntry) => void,
@@ -134,10 +134,14 @@ class TemporalBuildNodeEntry extends GeneratorEntry {
     } else {
       if (this.declared) callbacks.recordDeclaration(this.declared);
       callbacks.visitValues(this.args);
-      if (this.dependencies)
-        for (let dependency of this.dependencies) callbacks.visitGenerator(dependency, containingGenerator);
+      this._visitDependencies(callbacks, containingGenerator);
       return true;
     }
+  }
+
+  _visitDependencies(callbacks: VisitEntryCallbacks, containingGenerator: Generator) {
+    if (this.dependencies)
+      for (let dependency of this.dependencies) callbacks.visitGenerator(dependency, containingGenerator);
   }
 
   serialize(context: SerializationContext) {
@@ -165,6 +169,19 @@ class TemporalBuildNodeEntry extends GeneratorEntry {
       }
       if (this.declared !== undefined) context.declare(this.declared);
     }
+  }
+}
+
+class ConditionalTemporalBuildNodeEntry extends TemporalBuildNodeEntry {
+  _visitDependencies(callbacks: VisitEntryCallbacks, containingGenerator: Generator) {
+    let dependencies = this.dependencies;
+    invariant(dependencies !== undefined);
+    invariant(dependencies.length === 2);
+    invariant(this.args.length === 1);
+    let condition = this.args[0];
+    invariant(condition instanceof AbstractValue);
+    callbacks.visitGenerator(dependencies[0], containingGenerator, { condition, inverse: false });
+    callbacks.visitGenerator(dependencies[1], containingGenerator, { condition, inverse: true });
   }
 }
 
@@ -606,26 +623,13 @@ export class Generator {
     this.emitStatement(args, buildfunc);
   }
 
-  getThrowOrReturn(condition: AbstractValue, trueBranch: Completion | Value, falseBranch: Completion | Value) {
-    let [args, buildfunc] = this._deconstruct(
-      condition,
-      trueBranch,
-      falseBranch,
-      completion => {
-        return [[completion.value], ([arg]) => t.throwStatement(arg)];
-      },
-      value => [[value], ([returnValue]) => t.returnStatement(returnValue)]
-    );
-    return [args, buildfunc];
-  }
-
   _deconstruct(
     condition: AbstractValue,
     trueBranch: Completion | Value,
     falseBranch: Completion | Value,
     onThrowCompletion: ThrowCompletion => ArgsAndBuildNode,
     onNormalValue: Value => ArgsAndBuildNode
-  ) {
+  ): [Array<Value>, (Array<BabelNodeExpression>) => BabelNodeStatement] {
     let targs;
     let tfunc;
     let fargs;
@@ -1014,17 +1018,19 @@ export class Generator {
 
   joinGenerators(joinCondition: AbstractValue, generator1: Generator, generator2: Generator): void {
     invariant(generator1 !== this && generator2 !== this && generator1 !== generator2);
-    this._addEntry({
-      args: [joinCondition],
-      buildNode: function([cond], context, valuesToProcess) {
-        let block1 = generator1.empty() ? null : serializeBody(generator1, context, valuesToProcess);
-        let block2 = generator2.empty() ? null : serializeBody(generator2, context, valuesToProcess);
-        if (block1) return t.ifStatement(cond, block1, block2);
-        invariant(block2);
-        return t.ifStatement(t.unaryExpression("!", cond), block2);
-      },
-      dependencies: [generator1, generator2],
-    });
+    this._entries.push(
+      new ConditionalTemporalBuildNodeEntry({
+        args: [joinCondition],
+        buildNode: function([cond], context, valuesToProcess) {
+          let block1 = generator1.empty() ? null : serializeBody(generator1, context, valuesToProcess);
+          let block2 = generator2.empty() ? null : serializeBody(generator2, context, valuesToProcess);
+          if (block1) return t.ifStatement(cond, block1, block2);
+          invariant(block2);
+          return t.ifStatement(t.unaryExpression("!", cond), block2);
+        },
+        dependencies: [generator1, generator2],
+      })
+    );
   }
 }
 
