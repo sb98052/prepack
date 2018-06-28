@@ -278,6 +278,7 @@ export class ResidualHeapVisitor {
   }
 
   visitObjectProperties(obj: ObjectValue, kind?: ObjectKind): void {
+    // In normal mode, properties of leaked objects are generated via assignments
     let { skipPrototype, constructor } = getObjectPrototypeMetadata(this.realm, obj);
     if (obj.temporalAlias !== undefined) return;
 
@@ -304,6 +305,13 @@ export class ResidualHeapVisitor {
         continue;
       }
       if (propertyBindingValue.pathNode !== undefined) continue; // property is written to inside a loop
+
+      // Leaked object. Properties are set via assignments
+      let isFunction = f => f instanceof ECMAScriptSourceFunctionValue;
+      let isLeaked = obj.isLeakedObject();
+      if (isLeaked && (descriptor === undefined || (!isFunction(descriptor.get) && !isFunction(descriptor.set))))
+        continue;
+
       invariant(propertyBindingValue);
       this.visitObjectProperty(propertyBindingValue);
     }
@@ -405,7 +413,7 @@ export class ResidualHeapVisitor {
     this.visitObjectProperties(val);
     const realm = this.realm;
     let lenProperty;
-    if (val.mightBeHavocedObject()) {
+    if (val.isLeakedObject()) {
       lenProperty = this.realm.evaluateWithoutLeakLogic(() => Get(realm, val, "length"));
     } else {
       lenProperty = Get(realm, val, "length");

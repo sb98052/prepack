@@ -32,7 +32,7 @@ import { cloneDescriptor, equalDescriptors, IsDataDescriptor, StrictEqualityComp
 import { construct_empty_effects } from "../realm.js";
 import { Path } from "../singletons.js";
 import { Generator } from "../utils/generator.js";
-import { AbstractValue, ConcreteValue, EmptyValue, ObjectValue, Value } from "../values/index.js";
+import { AbstractValue, EmptyValue, ObjectValue, Value, BooleanValue } from "../values/index.js";
 
 import invariant from "../invariant.js";
 
@@ -806,7 +806,40 @@ export class JoinImplementation {
     c1: CreatedObjects,
     c2: CreatedObjects
   ): PropertyBindings {
+    let joinLeakedObjectProperty = (b: PropertyBinding, d1: void | Descriptor, d2: void | Descriptor) => {
+      if (d1 === undefined) {
+        if (b.object instanceof ObjectValue && c2.has(b.object)) return d2; // no join
+
+        invariant(m2.has(b)); // The alternative path must be the source of leaking
+        return d2;
+      } else if (d2 === undefined) {
+        if (b.object instanceof ObjectValue && c1.has(b.object)) return d1; // no join
+
+        invariant(m1.has(b)); // The consequent path must be the source of leaking
+        return d1;
+      } else {
+        // Make the leak unconditional
+        let isTrue = bv => bv instanceof BooleanValue && bv.equals(realm.intrinsics.true);
+        if (isTrue(d1.value)) {
+          return d1;
+        } else if (isTrue(d2.value)) {
+          return d2;
+        } else {
+          invariant(
+            b.object instanceof ObjectValue && c1.has(b.object) && c2.has(b.object),
+            "Evidence of object leaked, but _isLeaked is false"
+          );
+          return d1;
+        }
+      }
+    };
+
     let join = (b: PropertyBinding, d1: void | Descriptor, d2: void | Descriptor) => {
+      if (b.object instanceof ObjectValue && b.key === "_isLeaked") {
+        invariant(ObjectValue.trackedPropertyNames.includes("_isLeaked"));
+        return joinLeakedObjectProperty(b, d1, d2);
+      }
+
       // If the PropertyBinding object has been freshly allocated do not join
       if (d1 === undefined) {
         if (b.object instanceof ObjectValue && c2.has(b.object)) return d2; // no join
