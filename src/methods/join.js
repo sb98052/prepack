@@ -819,14 +819,14 @@ export class JoinImplementation {
         return d1;
       } else {
         // Make the leak unconditional
-        let isTrue = bv => bv instanceof BooleanValue && bv.equals(realm.intrinsics.true);
+        let isTrue = bv => bv instanceof BooleanValue && bv.value;
         if (isTrue(d1.value)) {
           return d1;
         } else if (isTrue(d2.value)) {
           return d2;
         } else {
           invariant(
-            b.object instanceof ObjectValue && c1.has(b.object) && c2.has(b.object),
+            c1.has(b.object) && c2.has(b.object),
             "Evidence of object leaked, but _isLeaked is false"
           );
           return d1;
@@ -836,7 +836,7 @@ export class JoinImplementation {
 
     let join = (b: PropertyBinding, d1: void | Descriptor, d2: void | Descriptor) => {
       if (b.object instanceof ObjectValue && b.key === "_isLeaked") {
-        invariant(ObjectValue.trackedPropertyNames.includes("_isLeaked"));
+        invariant(ObjectValue.trackedPropertyBindingNames.has("_isLeaked"));
         return joinLeakedObjectProperty(b, d1, d2);
       }
 

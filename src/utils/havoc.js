@@ -173,7 +173,7 @@ class ObjectValueHavocingVisitor {
 
     // if this object wasn't already havoced, we need mark it as havoced
     // so that any mutation and property access get tracked after this.
-    if (obj.isNotLeakedObject()) {
+    if (!obj.isLeakedObject()) {
       obj.havoc();
       if (obj.symbols.size > 0) {
         throw new FatalError("TODO: Support havocing objects with symbols");
@@ -343,7 +343,7 @@ class ObjectValueHavocingVisitor {
   }
 
   visitValueFunction(val: FunctionValue): void {
-    if (!val.isNotLeakedObject()) {
+    if (val.isLeakedObject()) {
       return;
     }
     this.visitObjectProperties(val);
@@ -390,7 +390,7 @@ class ObjectValueHavocingVisitor {
   }
 
   visitValueObject(val: ObjectValue): void {
-    if (!val.isNotLeakedObject()) {
+    if (val.isLeakedObject()) {
       return;
     }
 

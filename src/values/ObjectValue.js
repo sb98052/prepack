@@ -157,7 +157,7 @@ export default class ObjectValue extends ConcreteValue {
             // We're still initializing so we can set a property.
             this.$IsClassPrototype === undefined ||
               // It's not havoced so we can set a property.
-              this.isNotLeakedObject() ||
+              !this.isLeakedObject() ||
               // Object.assign() implementation needs to temporarily
               // make potentially havoced objects non-partial and back.
               // We don't gain anything from checking whether it's havoced
@@ -409,11 +409,9 @@ export default class ObjectValue extends ConcreteValue {
   }
 
   isLeakedObject(): boolean {
-    return this._isLeaked.equals(this.$Realm.intrinsics.true);
-  }
-
-  isNotLeakedObject(): boolean {
-    return this._isLeaked.equals(this.$Realm.intrinsics.false);
+    let isLeaked = this._isLeaked; 
+    invariant(isLeaked instanceof BooleanValue); 
+    return isLeaked.value
   }
 
   isSimpleObject(): boolean {

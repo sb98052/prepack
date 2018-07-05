@@ -1,10 +1,8 @@
-// copies of 42:1
-
 (function () {
   function f(g, c) {
     let o = {foo: 42};
     if (c) {
-      g(o);
+      g(o => o);
     } else {
       o.now = 1;
     } 
@@ -13,5 +11,5 @@
   }
 
   global.__optimize && __optimize(f);
-  inspect = function() { return f(true, h => h()); }
+  inspect = function() { return JSON.stringify(f(h => h(), false));}
 })();

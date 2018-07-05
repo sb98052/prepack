@@ -6,4 +6,4 @@ function f(g) {
 }
 
 global.__optimize && __optimize(f);
-inspect = function() { return f(true, h => h()); }
+inspect = function() { return f(h => h()); }
