@@ -1048,7 +1048,8 @@ export class ResidualHeapVisitor {
 
   visitEquivalentValue<T: Value>(val: T): T {
     if (val instanceof AbstractValue) {
-      let equivalentValue = this.equivalenceSet.add(val);
+      // let equivalentValue = this.equivalenceSet.add(val);
+      let equivalentValue = val;
       if (this.preProcessValue(equivalentValue)) this.visitAbstractValue(equivalentValue);
       this.postProcessValue(equivalentValue);
       return (equivalentValue: any);
